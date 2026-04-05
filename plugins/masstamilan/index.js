@@ -21,16 +21,21 @@ async function search(query) {
     if (!cleanQuery) return [];
 
     const keywords = cleanQuery.split(' ');
-    // Try original, then try cleaned, then try last words
+    
+    // Try to find the movie name specifically if it's in brackets (common iTunes format)
+    let movieName = null;
+    const movieMatch = rawQuery.match(/\(From ["'](.*?)["']\)/i) || rawQuery.match(/From ["'](.*?)["']/i);
+    if (movieMatch) movieName = movieMatch[1].trim();
+
     const searchStrategies = [
-        keywords.join(' '), // Full
-        keywords.filter(w => !['from', 'official', 'video', 'song', 'full', 'mp3', 'the', 'mix'].includes(w.toLowerCase())).join(' '), // Cleaned
-        keywords.slice(-2).join(' ') // Last two words (often movie name)
-    ].filter((s, i, a) => s && a.indexOf(s) === i); // Unique
+        movieName, // Movie name if discovered
+        keywords.slice(-2).join(' '), // Last two words (often song + movie or movie name)
+        keywords.filter(w => !['from', 'official', 'video', 'song', 'full', 'mp3', 'the', 'mix', 'with', 'lyrics', 'audio'].includes(w.toLowerCase())).join(' ') // Cleaned
+    ].filter((s, i, a) => s && s.length > 2 && a.indexOf(s) === i);
 
     try {
         for (const searchKeyword of searchStrategies) {
-        console.log(`[Plugin] MassTamilan strategy: "${searchKeyword}"`);
+            console.log(`[Plugin] MassTamilan try search: "${searchKeyword}"`);
         try {
             const searchUrl = `${baseUrl}/search?keyword=${encodeURIComponent(searchKeyword)}`;
             const response = await fetch(searchUrl, { headers });
@@ -39,32 +44,34 @@ async function search(query) {
             const albumLinks = [];
             const seen = new Set();
             
-            // Ultra robust: Match any href that looks like an album link, and grab title from anywhere inside or attribute
-            const aRegex = /<a[^>]+href=(['"])([^'"]+?)\1[^>]*title=(['"])([^'"]+?)\3/gi;
+            // Very permissive regex for album links on search page
+            // Look for any link containing "-songs"
+            const linkRegex = /href=(['"])([^'"]+-songs[^'"]*)\1/gi;
             let match;
-            while ((match = aRegex.exec(html)) !== null && albumLinks.length < 5) {
+            while ((match = linkRegex.exec(html)) !== null && albumLinks.length < 5) {
                 const href = match[2];
-                const title = match[4];
-                if (!href.includes('category') && href.length > 5 && !seen.has(href)) {
+                if (!seen.has(href)) {
                     seen.add(href);
-                    albumLinks.push({ href: href.split('?')[0].startsWith('http') ? href.split('?')[0] : `${baseUrl}${href.split('?')[0]}`, title });
-                }
-            }
-
-            if (albumLinks.length === 0) {
-                // Try simpler regex if title attribute fails
-                const simpleRegex = /<a[^>]+href=(['"])([^'"]+-songs)\1/gi;
-                while ((match = simpleRegex.exec(html)) !== null && albumLinks.length < 5) {
-                    const href = match[2];
-                    if (!seen.has(href)) {
-                        seen.add(href);
-                        albumLinks.push({ href: href.startsWith('http') ? href : `${baseUrl}${href}`, title: "Unknown Album" });
+                    
+                    // Try to find a title in the same <a> tag or nearby
+                    let title = "Unknown Album";
+                    const aStart = html.lastIndexOf('<a', match.index);
+                    const aEnd = html.indexOf('>', match.index);
+                    if (aStart !== -1 && aEnd !== -1) {
+                        const aTag = html.substring(aStart, aEnd + 1);
+                        const tMatch = aTag.match(/title=(['"])(.*?)\1/i);
+                        if (tMatch) title = tMatch[2];
                     }
+                    
+                    albumLinks.push({ 
+                        href: href.split('?')[0].startsWith('http') ? href.split('?')[0] : `${baseUrl}${href.split('?')[0]}`, 
+                        title 
+                    });
                 }
             }
 
             if (albumLinks.length > 0) {
-                console.log(`[Plugin] MassTamilan found ${albumLinks.length} albums with strategy "${searchKeyword}"`);
+                console.log(`[Plugin] MassTamilan found ${albumLinks.length} albums for strategy "${searchKeyword}"`);
                 const allResults = [];
                 for (const link of albumLinks) {
                     const results = await scrapeAlbum(link.href, baseUrl, cleanQuery);
@@ -72,6 +79,8 @@ async function search(query) {
                     if (allResults.length >= 20) break;
                 }
                 if (allResults.length > 0) return allResults;
+            } else {
+                console.log(`[Plugin] MassTamilan 0 albums in HTML (length: ${html.length}) for "${searchKeyword}"`);
             }
         } catch (e) {
             console.log(`[Plugin] MassTamilan strategy error: ${e.message}`);
