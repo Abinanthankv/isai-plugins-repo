@@ -81,6 +81,9 @@ async function search(query) {
                 if (allResults.length > 0) return allResults;
             } else {
                 console.log(`[Plugin] MassTamilan 0 albums in HTML (length: ${html.length}) for "${searchKeyword}"`);
+                if (html.length < 10000) {
+                    console.log(`[Plugin] HTML Snippet: ${html.substring(0, 500).replace(/\s+/g, ' ')}`);
+                }
             }
         } catch (e) {
             console.log(`[Plugin] MassTamilan strategy error: ${e.message}`);
