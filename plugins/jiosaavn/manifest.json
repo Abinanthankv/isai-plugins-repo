@@ -1,0 +1,10 @@
+{
+  "id": "org.isai.jiosaavn",
+  "name": "JioSaavn",
+  "version": "1.0.0",
+  "description": "Music Scraper for JioSaavn",
+  "author": "Abinanthan",
+  "type": "music_scraper",
+  "entry": "index.js",
+  "icon": "https://www.jiosaavn.com/favicon.ico"
+}

@@ -1,0 +1,10 @@
+[
+  {
+    "id": "org.isai.jiosaavn",
+    "manifest": "plugins/jiosaavn/manifest.json"
+  },
+  {
+    "id": "org.isai.masstamilan",
+    "manifest": "plugins/masstamilan/manifest.json"
+  }
+]
