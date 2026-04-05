@@ -90,39 +90,56 @@ async function scrapeAlbum(albumUrl, baseUrl, cleanQuery) {
         const results = [];
         const queryWords = cleanQuery.toLowerCase().split(' ').filter(w => w.length > 2);
 
-        // Find songs - more robust link discovery
-        console.log(`[Plugin] Masstamilan HTML length: ${html.length}`);
-        const dlinkRegex = /<a[^>]*class=["'][^"']*?\bdlink\b[^"']*?["'][^>]*href=(['"])(.*?)\1/gi;
-        let dMatch;
-        while ((dMatch = dlinkRegex.exec(html)) !== null) {
-            const url = dMatch[2];
+        // Use a safe, simple regex to find all anchor tags, then filter in JS
+        const anchorRegex = /<a\s+[^>]*?href=(['"])(.*?)\1/gi;
+        let aMatch;
+        while ((aMatch = anchorRegex.exec(html)) !== null) {
+            const fullTag = aMatch[0];
+            const url = aMatch[2];
+            
+            // Check if this is a download link (contains dlink class)
+            if (!fullTag.includes('dlink')) continue;
             if (!url.includes('320')) continue; 
+            if (url.includes('zip') || url.includes('rar')) continue;
 
-            const rowStart = html.lastIndexOf('<tr', dMatch.index);
-            const rowEnd = html.indexOf('</tr>', dMatch.index);
-            if (rowStart !== -1 && rowEnd !== -1) {
-                const rowHtml = html.substring(rowStart, rowEnd);
-                const nameMatch = rowHtml.match(/itemprop="name"[^>]*>([\s\S]*?)<\/span>/) || rowHtml.match(/<h2>([\s\S]*?)<\/h2>/);
-                let songName = nameMatch ? nameMatch[1].replace(/<[^>]+>/g, '').trim() : null;
-                console.log(`[Plugin] Masstamilan candidate song: ${songName}`);
+            // Extract title from <a> tag's title attribute
+            let songName = null;
+            const titleAttrMatch = fullTag.match(/title=(['"])(.*?)\1/i);
+            if (titleAttrMatch) {
+                const titleAttr = titleAttrMatch[2];
+                // Masstamilan title format: "Download Pathikichu 320kbps"
+                const nameMatch = titleAttr.match(/Download (.*?) (128|320)kbps/i);
+                if (nameMatch) songName = nameMatch[1].trim();
+            }
 
-                if (songName) {
-                    const songLower = songName.toLowerCase();
-                    const albumLower = albumTitle.toLowerCase();
-                    const isMatch = queryWords.length === 0 || queryWords.some(w => songLower.includes(w) || albumLower.includes(w));
-                    
-                    if (isMatch) {
-                        results.push({
-                            title: songName,
-                            artist: "Various Artists",
-                            url: url.startsWith('http') ? url : `${baseUrl}${url}`,
-                            size: 0,
-                            format: 'MP3 (320kbps Plugin)',
-                            source: 'MassTamilan',
-                            album: albumTitle,
-                            thumbnail: thumbnail
-                        });
-                    }
+            // Fallback to row parsing if title extraction failed
+            if (!songName) {
+                const rowStart = html.lastIndexOf('<tr', aMatch.index);
+                const rowEnd = html.indexOf('</tr>', aMatch.index);
+                if (rowStart !== -1 && rowEnd !== -1) {
+                    const rowHtml = html.substring(rowStart, rowEnd);
+                    const nameMatchRow = rowHtml.match(/itemprop="name"[^>]*>([\s\S]*?)<\/span>/) || rowHtml.match(/<h2>([\s\S]*?)<\/h2>/);
+                    songName = nameMatchRow ? nameMatchRow[1].replace(/<[^>]+>/g, '').trim() : null;
+                }
+            }
+
+            if (songName) {
+                const songLower = songName.toLowerCase();
+                const albumLower = albumTitle.toLowerCase();
+                // Filter: at least one word from query must match EITHER song or album
+                const isMatch = queryWords.length === 0 || queryWords.some(w => songLower.includes(w) || albumLower.includes(w));
+                
+                if (isMatch) {
+                    results.push({
+                        title: songName,
+                        artist: "Various Artists",
+                        url: url.startsWith('http') ? url : `${baseUrl}${url}`,
+                        size: 0,
+                        format: 'MP3 (320kbps Plugin)',
+                        source: 'MassTamilan',
+                        album: albumTitle,
+                        thumbnail: thumbnail
+                    });
                 }
             }
         }
