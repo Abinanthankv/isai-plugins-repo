@@ -37,7 +37,7 @@ async function search(query) {
         for (const searchKeyword of searchStrategies) {
             console.log(`[Plugin] MassTamilan try search: "${searchKeyword}"`);
         try {
-            const searchUrl = `${baseUrl}/search?keyword=${encodeURIComponent(searchKeyword)}`;
+            const searchUrl = `${baseUrl}/search?keyword=${encodeURIComponent(searchKeyword)}&_cb=${Date.now()}`;
             const response = await fetch(searchUrl, { headers });
             const html = await response.text();
 
