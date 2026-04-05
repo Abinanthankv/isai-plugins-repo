@@ -1,5 +1,5 @@
 /**
- * Masstamilan Plugin - Ultra Robust Version
+ * Masstamilan Plugin - Bulletproof Rewrite (v1.0.1)
  */
 
 async function search(query) {
@@ -16,45 +16,43 @@ async function search(query) {
         return await scrapeAlbum(rawQuery, baseUrl, '');
     }
 
-    // 2. Normal keyword search
-    const cleanQuery = rawQuery.replace(/[&()"[\]]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (!cleanQuery) return [];
-
-    const keywords = cleanQuery.split(' ');
-    
-    // Try to find the movie name specifically if it's in brackets (common iTunes format)
+    // 2. Intelligent Movie Name Extraction
     let movieName = null;
     const movieMatch = rawQuery.match(/\(From ["'](.*?)["']\)/i) || rawQuery.match(/From ["'](.*?)["']/i);
     if (movieMatch) movieName = movieMatch[1].trim();
 
+    // 3. Clean keywords (everything except movie name if we have it, else just the query)
+    const cleanQuery = rawQuery.replace(/[&()"[\]]/g, ' ').replace(/\s+/g, ' ').trim();
+    const keywords = cleanQuery.split(' ');
+    
     const searchStrategies = [
-        movieName, // Movie name if discovered
-        keywords.slice(-2).join(' '), // Last two words (often song + movie or movie name)
-        keywords.filter(w => !['from', 'official', 'video', 'song', 'full', 'mp3', 'the', 'mix', 'with', 'lyrics', 'audio'].includes(w.toLowerCase())).join(' ') // Cleaned
+        movieName, // Strategy A: Exact Movie Title (Most Reliable)
+        keywords.length > 3 ? keywords.slice(-3).join(' ') : cleanQuery, // Strategy B: Song + Movie
+        keywords.filter(w => !['from', 'official', 'video', 'song', 'full', 'mp3', 'the', 'mixed', 'audio'].includes(w.toLowerCase())).join(' ') // Strategy C: Clean words
     ].filter((s, i, a) => s && s.length > 2 && a.indexOf(s) === i);
 
-    try {
-        for (const searchKeyword of searchStrategies) {
-            console.log(`[Plugin] MassTamilan try search: "${searchKeyword}"`);
+    for (const searchKeyword of searchStrategies) {
         try {
+            console.log(`[Plugin] MassTamilan search attempt: "${searchKeyword}"`);
             const searchUrl = `${baseUrl}/search?keyword=${encodeURIComponent(searchKeyword)}&_cb=${Date.now()}`;
             const response = await fetch(searchUrl, { headers });
+            
+            if (!response.ok) continue;
             const html = await response.text();
 
+            // Find album links with "-songs" in href
             const albumLinks = [];
             const seen = new Set();
-            
-            // Very permissive regex for album links on search page
-            // Look for any link containing "-songs"
             const linkRegex = /href=(['"])([^'"]+-songs[^'"]*)\1/gi;
             let match;
+            
             while ((match = linkRegex.exec(html)) !== null && albumLinks.length < 5) {
                 const href = match[2];
                 if (!seen.has(href)) {
                     seen.add(href);
                     
-                    // Try to find a title in the same <a> tag or nearby
-                    let title = "Unknown Album";
+                    // Basic title extraction from <a> title attribute or nearby text
+                    let title = "Album";
                     const aStart = html.lastIndexOf('<a', match.index);
                     const aEnd = html.indexOf('>', match.index);
                     if (aStart !== -1 && aEnd !== -1) {
@@ -71,7 +69,7 @@ async function search(query) {
             }
 
             if (albumLinks.length > 0) {
-                console.log(`[Plugin] MassTamilan found ${albumLinks.length} albums for strategy "${searchKeyword}"`);
+                console.log(`[Plugin] MassTamilan found ${albumLinks.length} albums for "${searchKeyword}"`);
                 const allResults = [];
                 for (const link of albumLinks) {
                     const results = await scrapeAlbum(link.href, baseUrl, cleanQuery);
@@ -79,21 +77,12 @@ async function search(query) {
                     if (allResults.length >= 20) break;
                 }
                 if (allResults.length > 0) return allResults;
-            } else {
-                console.log(`[Plugin] MassTamilan 0 albums in HTML (length: ${html.length}) for "${searchKeyword}"`);
-                if (html.length < 10000) {
-                    console.log(`[Plugin] HTML Snippet: ${html.substring(0, 500).replace(/\s+/g, ' ')}`);
-                }
             }
         } catch (e) {
-            console.log(`[Plugin] MassTamilan strategy error: ${e.message}`);
+            console.log(`[Plugin] MassTamilan strategy failed: ${e.message}`);
         }
     }
     return [];
-    } catch (e) {
-        console.log(`[Plugin] MassTamilan search error: ${e.message}`);
-        return [];
-    }
 }
 
 async function scrapeAlbum(albumUrl, baseUrl, cleanQuery) {
@@ -102,83 +91,48 @@ async function scrapeAlbum(albumUrl, baseUrl, cleanQuery) {
     };
     try {
         const response = await fetch(albumUrl, { headers });
+        if (!response.ok) return [];
         const html = await response.text();
 
-        // Extract Album Title (basic)
+        // Extract Album Title & Thumbnail
         let albumTitle = "Unknown Album";
         const hMatch = html.match(/<h1[^>]*>(.*?)<\/h1>/i);
-        if (hMatch) {
-            albumTitle = hMatch[1].replace(/<[^>]+>/g, '').replace(' Tamil Songs', '').replace(' Songs Download', '').trim();
-        }
+        if (hMatch) albumTitle = hMatch[1].replace(/<[^>]+>/g, '').replace(' Tamil Songs', '').trim();
 
-        // Extract Thumbnail
-        let thumbnail = null;
-        const imgMatch = html.match(/class="info-wrapper"[^>]*>[\s\S]*?src=(['"])(.*?)\1/);
-        if (imgMatch) {
-            const src = imgMatch[2];
-            thumbnail = src.startsWith('http') ? src : `${baseUrl}${src}`;
-        }
+        let thumbnail = "";
+        const imgMatch = html.match(/<img[^>]+src=(['"])([^'"]+\.jpg)\1[^>]+class=(['"])(?:cover|album-cover)/i) || html.match(/<img[^>]+src=(['"])([^'"]+\.jpg)\1/i);
+        if (imgMatch) thumbnail = imgMatch[2].startsWith('http') ? imgMatch[2] : `${baseUrl}${imgMatch[2]}`;
 
-        const results = [];
-        const queryWords = cleanQuery.toLowerCase().split(' ').filter(w => w.length > 2);
-
-        // Use a safe, simple regex to find all anchor tags, then filter in JS
-        const anchorRegex = /<a\s+[^>]*?href=(['"])(.*?)\1/gi;
-        let aMatch;
-        while ((aMatch = anchorRegex.exec(html)) !== null) {
-            const fullTag = aMatch[0];
-            const url = aMatch[2];
+        const songs = [];
+        const seenUrls = new Set();
+        
+        // Find 320kbps download links
+        // Their site uses <a class="dlink" title="Download [SongName] 320kbps" href="[URL]">
+        const dlinkRegex = /<a[^>]+class=["']dlink["'][^>]*title=["']Download (.*?) 320kbps["'][^>]*href=["']([^"']+)["']/gi;
+        let dmatch;
+        
+        while ((dmatch = dlinkRegex.exec(html)) !== null) {
+            let songName = dmatch[1].trim();
+            let downloadUrl = dmatch[2];
             
-            // Check if this is a download link (contains dlink class)
-            if (!fullTag.includes('dlink')) continue;
-            if (!url.includes('320')) continue; 
-            if (url.includes('zip') || url.includes('rar')) continue;
+            if (!downloadUrl.includes('320kbps')) continue; // Skip 128kbps if present in logic
+            if (seenUrls.has(downloadUrl)) continue;
+            seenUrls.add(downloadUrl);
 
-            // Extract title from <a> tag's title attribute
-            let songName = null;
-            const titleAttrMatch = fullTag.match(/title=(['"])(.*?)\1/i);
-            if (titleAttrMatch) {
-                const titleAttr = titleAttrMatch[2];
-                // Masstamilan title format: "Download Pathikichu 320kbps"
-                const nameMatch = titleAttr.match(/Download (.*?) (128|320)kbps/i);
-                if (nameMatch) songName = nameMatch[1].trim();
-            }
-
-            // Fallback to row parsing if title extraction failed
-            if (!songName) {
-                const rowStart = html.lastIndexOf('<tr', aMatch.index);
-                const rowEnd = html.indexOf('</tr>', aMatch.index);
-                if (rowStart !== -1 && rowEnd !== -1) {
-                    const rowHtml = html.substring(rowStart, rowEnd);
-                    const nameMatchRow = rowHtml.match(/itemprop="name"[^>]*>([\s\S]*?)<\/span>/) || rowHtml.match(/<h2>([\s\S]*?)<\/h2>/);
-                    songName = nameMatchRow ? nameMatchRow[1].replace(/<[^>]+>/g, '').trim() : null;
-                }
-            }
-
-            if (songName) {
-                const songLower = songName.toLowerCase();
-                const albumLower = albumTitle.toLowerCase();
-                // Filter: at least one word from query must match EITHER song or album
-                const isMatch = queryWords.length === 0 || queryWords.some(w => songLower.includes(w) || albumLower.includes(w));
-                
-                if (isMatch) {
-                    results.push({
-                        title: songName,
-                        artist: "Various Artists",
-                        url: url.startsWith('http') ? url : `${baseUrl}${url}`,
-                        size: 0,
-                        format: 'MP3 (320kbps Plugin)',
-                        source: 'MassTamilan',
-                        album: albumTitle,
-                        thumbnail: thumbnail
-                    });
-                }
-            }
+            songs.push({
+                title: songName,
+                artist: albumTitle,
+                album: albumTitle,
+                url: downloadUrl.startsWith('http') ? downloadUrl : `${baseUrl}${downloadUrl}`,
+                thumbnail: thumbnail,
+                format: 'MP3 (320kbps)',
+                source: 'MassTamilan'
+            });
         }
-
-        return results;
+        
+        return songs;
     } catch (e) {
-        console.log(`[Plugin] MassTamilan album error: ${e.message}`);
+        console.log(`[Plugin] MassTamilan scrape error: ${e.message}`);
         return [];
     }
 }

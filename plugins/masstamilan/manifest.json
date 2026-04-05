@@ -1,7 +1,7 @@
 {
   "id": "org.isai.masstamilan",
   "name": "MassTamilan",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Music Scraper for MassTamilan (320kbps)",
   "author": "Abinanthan",
   "type": "music_scraper",
