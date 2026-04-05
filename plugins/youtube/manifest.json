@@ -1,0 +1,10 @@
+{
+  "id": "org.isai.youtube",
+  "name": "YouTube (via Scraping)",
+  "version": "1.0.0",
+  "description": "Search YouTube and get streamable video IDs.",
+  "author": "Isai Team",
+  "icon": "https://raw.githubusercontent.com/Abinanthankv/isai-plugins-repo/main/plugins/youtube/icon.png",
+  "entry": "index.js",
+  "type": "music_scraper"
+}

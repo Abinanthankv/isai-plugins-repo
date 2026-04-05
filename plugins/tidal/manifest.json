@@ -1,0 +1,10 @@
+{
+  "id": "org.isai.tidal",
+  "name": "Tidal (via SquidWTF)",
+  "version": "1.0.0",
+  "description": "Fetch Hi-Res lossless music from Tidal via SquidWTF API.",
+  "author": "Isai Team",
+  "icon": "https://raw.githubusercontent.com/Abinanthankv/isai-plugins-repo/main/plugins/tidal/icon.png",
+  "entry": "index.js",
+  "type": "music_scraper"
+}
