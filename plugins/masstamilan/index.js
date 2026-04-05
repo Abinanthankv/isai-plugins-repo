@@ -34,26 +34,16 @@ async function search(query) {
         const albumLinks = [];
         const seen = new Set();
         
-        // Find all links containing "-songs"
-        const regex = /href=(['"])([^'"]+-songs[^'"]*)\1/g;
+        // Ultra robust: Find any anchor tag with a title attribute, skipping categories
+        const regex = /<a[^>]*href=(['"])([^'"]+)\1[^>]*title=(['"])([^'"]+)\3/gi;
         let match;
         while ((match = regex.exec(html)) !== null && albumLinks.length < 5) {
             const href = match[2];
-            if (!seen.has(href)) {
+            const title = match[4];
+            
+            // Skip generic or category pages
+            if (!href.includes('category') && href.length > 5 && !seen.has(href)) {
                 seen.add(href);
-                // Try to find title in the same <a> tag
-                let title = "Unknown Album";
-                const startPos = html.lastIndexOf('<a', match.index);
-                const endPos = html.indexOf('>', match.index);
-                if (startPos !== -1 && endPos !== -1) {
-                    const tag = html.substring(startPos, endPos + 1);
-                    const tMatch = tag.match(/title=(['"])(.*?)\1/);
-                    if (tMatch) title = tMatch[2];
-                    else {
-                        const h2Match = html.substring(startPos, endPos + 200).match(/<h2>(.*?)<\/h2>/);
-                        if (h2Match) title = h2Match[1];
-                    }
-                }
                 albumLinks.push({ href: href.startsWith('http') ? href : `${baseUrl}${href}`, title });
             }
         }
