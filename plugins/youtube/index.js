@@ -1,6 +1,5 @@
 /**
- * YouTube Scraper Plugin
- * Uses scraping of m.youtube.com to find video metadata
+ * YouTube Scraper Plugin - Ultra Robust Version
  */
 
 async function search(query) {
@@ -18,27 +17,69 @@ async function search(query) {
         });
         const html = await response.text();
         
-        // Extract ytInitialData
-        const match = html.match(/var ytInitialData = ({.*?});/);
-        if (!match) {
-            console.log("[Plugin] YouTube: Could not find ytInitialData");
+        let data = null;
+        
+        // Strategy 1: Look for ytInitialData variable with various markers
+        const markers = ['ytInitialData = ', 'window["ytInitialData"] = ', 'window[\'ytInitialData\'] = ', 'var ytInitialData ='];
+        for (const marker of markers) {
+            const idx = html.indexOf(marker);
+            if (idx !== -1) {
+                const jsonStart = html.indexOf('{', idx + marker.length);
+                if (jsonStart !== -1) {
+                    data = extractBalancedJSON(html, jsonStart);
+                    if (data && findVideoRendererItems(data).length > 0) break;
+                }
+            }
+        }
+        
+        // Strategy 2: Scan all scripts for videoRenderer
+        if (!data || findVideoRendererItems(data).length === 0) {
+            console.log("[Plugin] YouTube: Marker-based search failed or returned empty. Scanning scripts...");
+            const scriptMatches = html.match(/<script[^>]*>([\s\S]*?)<\/script>/g) || [];
+            for (const script of scriptMatches) {
+                if (script.includes('videoRenderer')) {
+                    const braceIdx = script.indexOf('{');
+                    if (braceIdx !== -1) {
+                        const potential = extractBalancedJSON(script, braceIdx);
+                        if (potential) {
+                            const items = findVideoRendererItems(potential);
+                            if (items.length > 0) {
+                                data = potential;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Strategy 3: Extreme fallback - look for any { "contents": ... } pattern in the whole HTML
+        if (!data || findVideoRendererItems(data).length === 0) {
+            console.log("[Plugin] YouTube: Script scanning failed. Trying deep pattern match...");
+            let pos = 0;
+            while (true) {
+                const idx = html.indexOf('{"contents":', pos);
+                if (idx === -1) break;
+                const potential = extractBalancedJSON(html, idx);
+                if (potential) {
+                    const items = findVideoRendererItems(potential);
+                    if (items.length > 0) {
+                        data = potential;
+                        break;
+                    }
+                }
+                pos = idx + 10;
+                if (pos > html.length - 100) break;
+            }
+        }
+
+        if (!data) {
+            console.log("[Plugin] YouTube: FAILED to find any video data");
             return [];
         }
 
-        const data = JSON.parse(match[1]);
+        const videoItems = findVideoRendererItems(data);
         const results = [];
-        
-        // Navigate through the heavily nested YouTube JSON
-        const contents = data.contents && data.contents.sectionListRenderer && data.contents.sectionListRenderer.contents;
-        if (!contents) return [];
-
-        let videoItems = [];
-        for (const section of contents) {
-            if (section.itemSectionRenderer) {
-                videoItems = section.itemSectionRenderer.contents;
-                break;
-            }
-        }
 
         for (const item of videoItems) {
             const video = item.videoRenderer;
@@ -46,7 +87,8 @@ async function search(query) {
 
             const videoId = video.videoId;
             const title = video.title && video.title.runs && video.title.runs[0] && video.title.runs[0].text;
-            const author = video.ownerText && video.ownerText.runs && video.ownerText.runs[0] && video.ownerText.runs[0].text;
+            const author = (video.ownerText && video.ownerText.runs && video.ownerText.runs[0] && video.ownerText.runs[0].text) || 
+                          (video.shortBylineText && video.shortBylineText.runs && video.shortBylineText.runs[0] && video.shortBylineText.runs[0].text);
             const durationText = video.lengthText && video.lengthText.simpleText;
             const thumbnail = video.thumbnail && video.thumbnail.thumbnails && video.thumbnail.thumbnails[0] && video.thumbnail.thumbnails[0].url;
 
@@ -54,7 +96,7 @@ async function search(query) {
                 results.push({
                     title: title,
                     artist: author || "Unknown Artist",
-                    url: videoId, // Returning videoId which the app handles
+                    url: videoId,
                     source: "YouTube (Plugin)",
                     format: durationText || "Video",
                     linkType: "youtube",
@@ -63,12 +105,61 @@ async function search(query) {
                 });
             }
 
-            if (results.length >= 10) break;
+            if (results.length >= 15) break;
         }
 
+        console.log(`[Plugin] YouTube found ${results.length} results`);
         return results;
     } catch (e) {
         console.log(`[Plugin] YouTube search error: ${e.message}`);
         return [];
     }
+}
+
+function extractBalancedJSON(html, start) {
+    let braceCount = 0;
+    let inString = false;
+    let escape = false;
+    
+    for (let i = start; i < html.length; i++) {
+        const char = html[i];
+        if (char === '"' && !escape) inString = !inString;
+        if (!inString) {
+            if (char === '{') braceCount++;
+            if (char === '}') braceCount--;
+            if (braceCount === 0 && i > start) {
+                try {
+                    const candidate = html.substring(start, i + 1);
+                    return JSON.parse(candidate);
+                } catch (e) {
+                    return null;
+                }
+            }
+        }
+        escape = (char === '\\' && !escape);
+    }
+    return null;
+}
+
+function findVideoRendererItems(data) {
+    const items = [];
+    function search(obj, depth = 0) {
+        if (!obj || typeof obj !== 'object' || depth > 20) return;
+        if (obj.videoRenderer) {
+            items.push(obj);
+            return;
+        }
+        if (Array.isArray(obj)) {
+            for (const item of obj) search(item, depth + 1);
+        } else {
+            for (const key in obj) {
+                // Only descend into objects, skipping some known large non-result keys
+                if (key !== 'trackingParams' && typeof obj[key] === 'object') {
+                    search(obj[key], depth + 1);
+                }
+            }
+        }
+    }
+    search(data);
+    return items;
 }
