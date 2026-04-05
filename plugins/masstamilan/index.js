@@ -111,7 +111,7 @@ async function scrapeAlbum(albumUrl, baseUrl, cleanQuery) {
                           queryWords.some(w => songLower.includes(w) || albumLower.includes(w));
 
             if (matches) {
-                songResults.add({
+                songResults.push({
                     title: songName,
                     artist: artist,
                     url: downloadUrl,
