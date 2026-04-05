@@ -20,44 +20,64 @@ async function search(query) {
     const cleanQuery = rawQuery.replace(/[&()"[\]]/g, ' ').replace(/\s+/g, ' ').trim();
     if (!cleanQuery) return [];
 
-    const words = cleanQuery.split(' ');
-    const searchKeyword = words.length > 6 ? words.slice(0, 6).join(' ') : cleanQuery;
-
-    console.log(`[Plugin] MassTamilan searching for: "${searchKeyword}"`);
+    const keywords = cleanQuery.split(' ');
+    // Try original, then try cleaned, then try last words
+    const searchStrategies = [
+        keywords.join(' '), // Full
+        keywords.filter(w => !['from', 'official', 'video', 'song', 'full', 'mp3', 'the', 'mix'].includes(w.toLowerCase())).join(' '), // Cleaned
+        keywords.slice(-2).join(' ') // Last two words (often movie name)
+    ].filter((s, i, a) => s && a.indexOf(s) === i); // Unique
 
     try {
-        const searchUrl = `${baseUrl}/search?keyword=${encodeURIComponent(searchKeyword)}`;
-        console.log(`[Plugin] MassTamilan Fetching URL: ${searchUrl}`);
-        const response = await fetch(searchUrl, { headers });
-        const html = await response.text();
+        for (const searchKeyword of searchStrategies) {
+        console.log(`[Plugin] MassTamilan strategy: "${searchKeyword}"`);
+        try {
+            const searchUrl = `${baseUrl}/search?keyword=${encodeURIComponent(searchKeyword)}`;
+            const response = await fetch(searchUrl, { headers });
+            const html = await response.text();
 
-        const albumLinks = [];
-        const seen = new Set();
-        
-        // Ultra robust: Find any anchor tag with a title attribute, skipping categories
-        const regex = /<a[^>]*href=(['"])([^'"]+)\1[^>]*title=(['"])([^'"]+)\3/gi;
-        let match;
-        while ((match = regex.exec(html)) !== null && albumLinks.length < 5) {
-            const href = match[2];
-            const title = match[4];
+            const albumLinks = [];
+            const seen = new Set();
             
-            // Skip generic or category pages
-            if (!href.includes('category') && href.length > 5 && !seen.has(href)) {
-                seen.add(href);
-                albumLinks.push({ href: href.startsWith('http') ? href : `${baseUrl}${href}`, title });
+            // Ultra robust: Match any href that looks like an album link, and grab title from anywhere inside or attribute
+            const aRegex = /<a[^>]+href=(['"])([^'"]+?)\1[^>]*title=(['"])([^'"]+?)\3/gi;
+            let match;
+            while ((match = aRegex.exec(html)) !== null && albumLinks.length < 5) {
+                const href = match[2];
+                const title = match[4];
+                if (!href.includes('category') && href.length > 5 && !seen.has(href)) {
+                    seen.add(href);
+                    albumLinks.push({ href: href.split('?')[0].startsWith('http') ? href.split('?')[0] : `${baseUrl}${href.split('?')[0]}`, title });
+                }
             }
+
+            if (albumLinks.length === 0) {
+                // Try simpler regex if title attribute fails
+                const simpleRegex = /<a[^>]+href=(['"])([^'"]+-songs)\1/gi;
+                while ((match = simpleRegex.exec(html)) !== null && albumLinks.length < 5) {
+                    const href = match[2];
+                    if (!seen.has(href)) {
+                        seen.add(href);
+                        albumLinks.push({ href: href.startsWith('http') ? href : `${baseUrl}${href}`, title: "Unknown Album" });
+                    }
+                }
+            }
+
+            if (albumLinks.length > 0) {
+                console.log(`[Plugin] MassTamilan found ${albumLinks.length} albums with strategy "${searchKeyword}"`);
+                const allResults = [];
+                for (const link of albumLinks) {
+                    const results = await scrapeAlbum(link.href, baseUrl, cleanQuery);
+                    allResults.push(...results);
+                    if (allResults.length >= 20) break;
+                }
+                if (allResults.length > 0) return allResults;
+            }
+        } catch (e) {
+            console.log(`[Plugin] MassTamilan strategy error: ${e.message}`);
         }
-
-        console.log(`[Plugin] MassTamilan found ${albumLinks.length} albums`);
-
-        const allResults = [];
-        for (const link of albumLinks) {
-            const results = await scrapeAlbum(link.href, baseUrl, cleanQuery);
-            allResults.push(...results);
-            if (allResults.length >= 20) break;
-        }
-
-        return allResults;
+    }
+    return [];
     } catch (e) {
         console.log(`[Plugin] MassTamilan search error: ${e.message}`);
         return [];
