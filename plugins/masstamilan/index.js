@@ -27,6 +27,7 @@ async function search(query) {
 
     try {
         const searchUrl = `${baseUrl}/search?keyword=${encodeURIComponent(searchKeyword)}`;
+        console.log(`[Plugin] MassTamilan Fetching URL: ${searchUrl}`);
         const response = await fetch(searchUrl, { headers });
         const html = await response.text();
 
