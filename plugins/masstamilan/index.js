@@ -1,5 +1,6 @@
 /**
  * Masstamilan Plugin - Bulletproof Rewrite (v1.0.1)
+ * Using bridgedFetch to bypass native JS engine conflicts.
  */
 
 async function search(query) {
@@ -11,6 +12,9 @@ async function search(query) {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     };
     
+    // Explicitly use bridgedFetch if available
+    const myFetch = typeof bridgedFetch !== 'undefined' ? bridgedFetch : fetch;
+
     // 1. Direct URL handling
     if (rawQuery.startsWith('http') && rawQuery.includes('masstamilan')) {
         return await scrapeAlbum(rawQuery, baseUrl, '');
@@ -21,26 +25,25 @@ async function search(query) {
     const movieMatch = rawQuery.match(/\(From ["'](.*?)["']\)/i) || rawQuery.match(/From ["'](.*?)["']/i);
     if (movieMatch) movieName = movieMatch[1].trim();
 
-    // 3. Clean keywords (everything except movie name if we have it, else just the query)
+    // 3. Clean keywords
     const cleanQuery = rawQuery.replace(/[&()"[\]]/g, ' ').replace(/\s+/g, ' ').trim();
     const keywords = cleanQuery.split(' ');
     
     const searchStrategies = [
-        movieName, // Strategy A: Exact Movie Title (Most Reliable)
-        keywords.length > 3 ? keywords.slice(-3).join(' ') : cleanQuery, // Strategy B: Song + Movie
-        keywords.filter(w => !['from', 'official', 'video', 'song', 'full', 'mp3', 'the', 'mixed', 'audio'].includes(w.toLowerCase())).join(' ') // Strategy C: Clean words
+        movieName, 
+        keywords.length > 3 ? keywords.slice(-3).join(' ') : cleanQuery,
+        keywords.filter(w => !['from', 'official', 'video', 'song', 'full', 'mp3', 'the', 'mixed', 'audio'].includes(w.toLowerCase())).join(' ')
     ].filter((s, i, a) => s && s.length > 2 && a.indexOf(s) === i);
 
     for (const searchKeyword of searchStrategies) {
         try {
-            console.log(`[Plugin] MassTamilan search attempt: "${searchKeyword}"`);
+            console.log(`[Plugin] MassTamilan bridged search attempt: "${searchKeyword}"`);
             const searchUrl = `${baseUrl}/search?keyword=${encodeURIComponent(searchKeyword)}&_cb=${Date.now()}`;
-            const response = await fetch(searchUrl, { headers });
+            const response = await myFetch(searchUrl, { headers });
             
             if (!response.ok) continue;
             const html = await response.text();
 
-            // Find album links with "-songs" in href
             const albumLinks = [];
             const seen = new Set();
             const linkRegex = /href=(['"])([^'"]+-songs[^'"]*)\1/gi;
@@ -50,8 +53,6 @@ async function search(query) {
                 const href = match[2];
                 if (!seen.has(href)) {
                     seen.add(href);
-                    
-                    // Basic title extraction from <a> title attribute or nearby text
                     let title = "Album";
                     const aStart = html.lastIndexOf('<a', match.index);
                     const aEnd = html.indexOf('>', match.index);
@@ -60,7 +61,6 @@ async function search(query) {
                         const tMatch = aTag.match(/title=(['"])(.*?)\1/i);
                         if (tMatch) title = tMatch[2];
                     }
-                    
                     albumLinks.push({ 
                         href: href.split('?')[0].startsWith('http') ? href.split('?')[0] : `${baseUrl}${href.split('?')[0]}`, 
                         title 
@@ -79,7 +79,7 @@ async function search(query) {
                 if (allResults.length > 0) return allResults;
             }
         } catch (e) {
-            console.log(`[Plugin] MassTamilan strategy failed: ${e.message}`);
+            console.log(`[Plugin] MassTamilan strategy error: ${e.message}`);
         }
     }
     return [];
@@ -89,13 +89,14 @@ async function scrapeAlbum(albumUrl, baseUrl, cleanQuery) {
     const headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     };
+    const myFetch = typeof bridgedFetch !== 'undefined' ? bridgedFetch : fetch;
+
     try {
-        const response = await fetch(albumUrl, { headers });
+        const response = await myFetch(albumUrl, { headers });
         if (!response.ok) return [];
         const html = await response.text();
 
-        // Extract Album Title & Thumbnail
-        let albumTitle = "Unknown Album";
+        let albumTitle = "Album";
         const hMatch = html.match(/<h1[^>]*>(.*?)<\/h1>/i);
         if (hMatch) albumTitle = hMatch[1].replace(/<[^>]+>/g, '').replace(' Tamil Songs', '').trim();
 
@@ -106,30 +107,21 @@ async function scrapeAlbum(albumUrl, baseUrl, cleanQuery) {
         const songs = [];
         const seenUrls = new Set();
         
-        // Find 320kbps download links
-        // Their site uses <a class="dlink" title="Download [SongName] 320kbps" href="[URL]">
         const dlinkRegex = /<a[^>]+class=["']dlink["'][^>]*title=["']Download (.*?) 320kbps["'][^>]*href=["']([^"']+)["']/gi;
         let dmatch;
         
         while ((dmatch = dlinkRegex.exec(html)) !== null) {
             let songName = dmatch[1].trim();
             let downloadUrl = dmatch[2];
-            
-            if (!downloadUrl.includes('320kbps')) continue; // Skip 128kbps if present in logic
             if (seenUrls.has(downloadUrl)) continue;
             seenUrls.add(downloadUrl);
 
             songs.push({
-                title: songName,
-                artist: albumTitle,
-                album: albumTitle,
+                title: songName, artist: albumTitle, album: albumTitle,
                 url: downloadUrl.startsWith('http') ? downloadUrl : `${baseUrl}${downloadUrl}`,
-                thumbnail: thumbnail,
-                format: 'MP3 (320kbps)',
-                source: 'MassTamilan'
+                thumbnail: thumbnail, format: 'MP3 (320kbps)', source: 'MassTamilan'
             });
         }
-        
         return songs;
     } catch (e) {
         console.log(`[Plugin] MassTamilan scrape error: ${e.message}`);
