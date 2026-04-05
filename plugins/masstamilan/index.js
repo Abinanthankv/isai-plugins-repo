@@ -102,7 +102,7 @@ async function scrapeAlbum(albumUrl, baseUrl, cleanQuery) {
 
         // Find songs - more robust link discovery
         console.log(`[Plugin] Masstamilan HTML length: ${html.length}`);
-        const dlinkRegex = /<a[^>]*class=["']dlink["'][^>]*href=(['"])(.*?)\1/g;
+        const dlinkRegex = /<a[^>]*class=["'][^"']*?\bdlink\b[^"']*?["'][^>]*href=(['"])(.*?)\1/gi;
         let dMatch;
         while ((dMatch = dlinkRegex.exec(html)) !== null) {
             const url = dMatch[2];
