@@ -103,8 +103,11 @@ async function scrapeAlbum(albumUrl, cleanQuery, headers) {
   let albumTitle = h1Match ? h1Match[1].replace(/<[^>]*>/g, '').trim() : 'Unknown Album';
   albumTitle = albumTitle.replace(' Tamil Songs', '').replace(' Songs Download', '');
 
-  // Parse thumbnail
-  const imgMatch = html.match(/<div class="info-wrapper">[\s\S]*?<img[^>]+src="([^"]+)"/i) || html.match(/<img[^>]+src="([^"]+)"[^>]*class="[^"]*img-responsive[^"]*"/i);
+  // Parse thumbnail (using updated figure.ib or alt="*poster" checks)
+  const imgMatch = html.match(/<figure class="ib">[\s\S]*?<img[^>]+src="([^"]+)"/i) || 
+                   html.match(/<img[^>]+src="([^"]+)"[^>]+alt="[^"]*poster/i) || 
+                   html.match(/<div class="info-wrapper">[\s\S]*?<img[^>]+src="([^"]+)"/i) || 
+                   html.match(/<img[^>]+src="([^"]+)"[^>]*class="[^"]*img-responsive[^"]*"/i);
   let thumbnail = imgMatch ? imgMatch[1] : null;
   if (thumbnail && !thumbnail.startsWith('http')) {
     thumbnail = baseUrl + thumbnail;
